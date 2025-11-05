@@ -1,7 +1,6 @@
 # ChainStorm
 
 [![bioRxiv](https://img.shields.io/badge/bioRxiv-2025.11.03.686219-b31b1b.svg)](https://www.biorxiv.org/content/10.1101/2025.11.03.686219v1)
-[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://MurrellGroup.github.io/ChainStorm.jl/stable/)
 [![Build Status](https://github.com/MurrellGroup/ChainStorm.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/MurrellGroup/ChainStorm.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![Coverage](https://codecov.io/gh/MurrellGroup/ChainStorm.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/MurrellGroup/ChainStorm.jl)
 
