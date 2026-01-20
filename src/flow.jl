@@ -61,9 +61,11 @@ function training_sample(b)
     return (; t, Xt, X1, rotξ, aas = b.aas, chainids = b.chainids, resinds = b.resinds)
 end
 
-function losses(hatframes, aalogits, ts)
+#function losses(hatframes, aalogits, ts)
+function losses(hatframes, ts)
     rotangent = Flowfusion.so3_tangent_coordinates_stack(values(linear(hatframes)), tensor(ts.Xt[2]))
-    hatloc, hatrot, hataas = (values(translation(hatframes)), rotangent, aalogits)
+    #hatloc, hatrot, hataas = (values(translation(hatframes)), rotangent, aalogits)
+    hatloc, hatrot = (values(translation(hatframes)), rotangent)
     l_loc = floss(P[1], hatloc, ts.X1[1], scalefloss(P[1], ts.t, 2, 0.2f0)) / 2
     l_rot = floss(P[2], hatrot, ts.rotξ, scalefloss(P[2], ts.t, 2, 0.2f0)) / 10
     #l_aas = floss(P[3], hataas, ts.X1[3], scalefloss(P[3], ts.t, 1, 0.2f0)) / 100
