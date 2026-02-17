@@ -1,6 +1,32 @@
 ipa(l, f, x, pf, c, m) = l(f, x, pair_feats = pf, cond = c, mask = m)
 crossipa(l, f1, f2, x, pf, c, m) = l(f1, f2, x, pair_feats = pf, cond = c, mask = m)
 
+# @eval Flux begin
+
+# function loadmodel!(dst, src; filter = _ -> true, cache = Base.IdSet())
+#     ldsts = _filter_children(filter, Functors.children(dst))
+#     lsrcs = _filter_children(filter, Functors.children(src))
+#     keys_ldsts = keys(ldsts)
+#     keys_lsrcs = keys(lsrcs)
+#     #collect(keys_ldsts) == collect(keys_lsrcs) || throw(ArgumentError("Tried to load $(keys_lsrcs) into $(keys_ldsts) but the structures do not match."))
+    
+#     for k in keys_lsrcs
+#         lsrc, ldst = lsrcs[k], ldsts[k]
+#         if ldst in cache # we already loaded this parameter before
+#         _tie_check(ldst, lsrc)
+#         elseif Functors.isleaf(ldst) # our first time loading this leaf
+#         push!(cache, ldst)
+#         loadleaf!(ldst, lsrc)
+#         else # this isn't a leaf
+#         loadmodel!(ldst, lsrc; filter, cache)
+#         end
+#     end
+    
+#     return dst
+# end
+
+# end
+
 struct ChainStormV1{L}
     layers::L
 end
@@ -14,6 +40,7 @@ function ChainStormV1(dim::Int = 384, depth::Int = 6, f_depth::Int = 6)
         AApre_t_encoding = Dense(dim => dim, bias=false),
         pair_rff = RandomFourierFeatures(2 => 64, 1f0),
         pair_project = Dense(64 => 32, bias=false),
+        disto_project = Dense(64 => 32, bias=false),
         AAencoder = Dense(21 => dim, bias=false),
         selfcond_crossipa = [CrossFrameIPA(dim, IPA(IPA_settings(dim, c_z = 32)), ln = AdaLN(dim, dim)) for _ in 1:depth],
         selfcond_selfipa = [CrossFrameIPA(dim, IPA(IPA_settings(dim, c_z = 32)), ln = AdaLN(dim, dim)) for _ in 1:depth],
@@ -25,11 +52,11 @@ function ChainStormV1(dim::Int = 384, depth::Int = 6, f_depth::Int = 6)
 end
 
 #function (fc::ChainStormV1)(t, Xt, chainids, resinds; sc_frames = nothing)
-function (fc::ChainStormV1)(t, Xt, aas, chainids, resinds; sc_frames = nothing)
+function (fc::ChainStormV1)(t, Xt, aas, chainids, resinds, disto_gram; sc_frames = nothing)
     l = fc.layers
     pmask = Flux.Zygote.@ignore self_att_padding_mask(Xt[1].lmask)
     pre_z = Flux.Zygote.@ignore l.pair_rff(pair_encode(resinds, chainids))
-    pair_feats = l.pair_project(pre_z)
+    pair_feats = l.pair_project(pre_z) + l.disto_project(disto_gram)
     t_rff = Flux.Zygote.@ignore l.t_rff(t)
     cond = reshape(l.cond_t_encoding(t_rff), :, 1, size(t,2))
     frames = Translation(tensor(Xt[1])) ∘ Rotation(tensor(Xt[2]))
