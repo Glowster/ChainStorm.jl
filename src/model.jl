@@ -44,6 +44,8 @@ function ChainStormV1(dim::Int = 384, depth::Int = 6, f_depth::Int = 6)
         AAencoder = Dense(21 => dim, bias=false),
         selfcond_crossipa = [CrossFrameIPA(dim, IPA(IPA_settings(dim, c_z = 32)), ln = AdaLN(dim, dim)) for _ in 1:depth],
         selfcond_selfipa = [CrossFrameIPA(dim, IPA(IPA_settings(dim, c_z = 32)), ln = AdaLN(dim, dim)) for _ in 1:depth],
+        selfcond_prev_crossipa = [CrossFrameIPA(dim, IPA(IPA_settings(dim, c_z = 32)), ln = AdaLN(dim, dim)) for _ in 1:depth],
+        selfcond_prev_selfipa = [CrossFrameIPA(dim, IPA(IPA_settings(dim, c_z = 32)), ln = AdaLN(dim, dim)) for _ in 1:depth],
         ipa_blocks = [IPAblock(dim, IPA(IPA_settings(dim, c_z = 32)), ln1 = AdaLN(dim, dim), ln2 = AdaLN(dim, dim)) for _ in 1:depth],
         framemovers = [Framemover(dim) for _ in 1:f_depth],
         AAdecoder = Chain(StarGLU(dim, 3dim), Dense(dim => 21, bias=false)),
@@ -52,7 +54,7 @@ function ChainStormV1(dim::Int = 384, depth::Int = 6, f_depth::Int = 6)
 end
 
 #function (fc::ChainStormV1)(t, Xt, chainids, resinds; sc_frames = nothing)
-function (fc::ChainStormV1)(t, Xt, aas, chainids, resinds, disto_gram; sc_frames = nothing)
+function (fc::ChainStormV1)(t, Xt, aas, chainids, resinds, disto_gram, Xtprev_frames; sc_frames = nothing)
     l = fc.layers
     pmask = Flux.Zygote.@ignore self_att_padding_mask(Xt[1].lmask)
     pre_z = Flux.Zygote.@ignore l.pair_rff(pair_encode(resinds, chainids))
@@ -70,6 +72,11 @@ function (fc::ChainStormV1)(t, Xt, aas, chainids, resinds, disto_gram; sc_frames
             f1, f2 = mod(i, 2) == 0 ? (frames, sc_frames) : (sc_frames, frames)
             x = Flux.Zygote.checkpointed(crossipa, l.selfcond_crossipa[i], f1, f2, x, pair_feats, cond, pmask)
         end
+
+        x = Flux.Zygote.checkpointed(crossipa, l.selfcond_prev_selfipa[i], Xtprev_frames, Xtprev_frames, x, pair_feats, cond, pmask)
+        f1, f2 = mod(floor(i/2), 2) == 0 ? (frames, Xtprev_frames) : (Xtprev_frames, frames)
+        x = Flux.Zygote.checkpointed(crossipa, l.selfcond_prev_crossipa[i], f1, f2, x, pair_feats, cond, pmask)
+
         x = Flux.Zygote.checkpointed(ipa, l.ipa_blocks[i], frames, x, pair_feats, cond, pmask)
         if i > l.depth - l.f_depth
             frames = l.framemovers[i - l.depth + l.f_depth](frames, x, t = t)
