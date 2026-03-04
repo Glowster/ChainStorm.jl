@@ -37,6 +37,7 @@ function ChainStormV1(dim::Int = 384, depth::Int = 6, f_depth::Int = 6)
         f_depth = f_depth,
         t_rff = RandomFourierFeatures(1 => dim, 1f0),
         cond_t_encoding = Dense(dim => dim, bias=false),
+        cond_delta_t_encoding = Dense(dim => dim, bias=false),
         AApre_t_encoding = Dense(dim => dim, bias=false),
         pair_rff = RandomFourierFeatures(2 => 64, 1f0),
         pair_project = Dense(64 => 32, bias=false),
@@ -54,13 +55,15 @@ function ChainStormV1(dim::Int = 384, depth::Int = 6, f_depth::Int = 6)
 end
 
 #function (fc::ChainStormV1)(t, Xt, chainids, resinds; sc_frames = nothing)
-function (fc::ChainStormV1)(t, Xt, aas, chainids, resinds, disto_gram, Xtprev_frames; sc_frames = nothing)
+function (fc::ChainStormV1)(t, Xt, aas, chainids, resinds, disto_gram, Xtprev_frames, delta_ts; sc_frames = nothing)
     l = fc.layers
+    delta_ts = 2f6 .* delta_ts
     pmask = Flux.Zygote.@ignore self_att_padding_mask(Xt[1].lmask)
     pre_z = Flux.Zygote.@ignore l.pair_rff(pair_encode(resinds, chainids))
     pair_feats = l.pair_project(pre_z) + l.disto_project(disto_gram)
     t_rff = Flux.Zygote.@ignore l.t_rff(t)
-    cond = reshape(l.cond_t_encoding(t_rff), :, 1, size(t,2))
+    deltat_rff = Flux.Zygote.@ignore l.t_rff(delta_ts)
+    cond = reshape(l.cond_t_encoding(t_rff)+l.cond_delta_t_encoding(deltat_rff), :, 1, size(t,2))
     frames = Translation(tensor(Xt[1])) ∘ Rotation(tensor(Xt[2]))
     AA_one_hots = tensor(Flux.onehotbatch(aas, 1:21))
     #AA_one_hots = tensor(Xt[3])
