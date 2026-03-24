@@ -59,7 +59,7 @@ end
 function (fc::ChainStormV1)(t, Xt, aas, chainids, resinds, disto_gram, Xtprev_frames, delta_ts, temps; sc_frames = nothing)
     l = fc.layers
     delta_ts = 2f6 .* delta_ts
-    temps = 5f-2 .* temps
+    temps = 2f-3 .* temps
     pmask = Flux.Zygote.@ignore self_att_padding_mask(Xt[1].lmask)
     pre_z = Flux.Zygote.@ignore l.pair_rff(pair_encode(resinds, chainids))
     pair_feats = l.pair_project(pre_z) + l.disto_project(disto_gram)
