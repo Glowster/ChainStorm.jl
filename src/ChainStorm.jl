@@ -42,6 +42,6 @@ function dummy_batch(chain_lengths)
     return (;chainids, resinds, padmask, aas, locs)
 end
 
-export training_sample, P, ChainStormV1, losses, flow_quickgen, export_pdb, gen2prot, dummy_batch, first_trajectory, load_model
+export training_sample, P, ChainStormV1, losses, per_sample_losses, LOC_WEIGHT, ROT_WEIGHT, flow_quickgen, export_pdb, gen2prot, dummy_batch, first_trajectory, load_model
 
 end
