@@ -61,22 +61,36 @@ function training_sample(b)
     return (; t, Xt, X1, rotξ, aas = b.aas, chainids = b.chainids, resinds = b.resinds)
 end
 
-const LOC_WEIGHT = 3f0
-const ROT_WEIGHT = 0.1f0
+const DEFAULT_LOC_WEIGHT = 1f0
+const DEFAULT_ROT_WEIGHT = 1f0
+const LOC_WEIGHT = DEFAULT_LOC_WEIGHT
+const ROT_WEIGHT = DEFAULT_ROT_WEIGHT
 
-#function losses(hatframes, aalogits, ts)
-function losses(hatframes, ts)
+function _per_sample_loss(err2, c, mask, weight)
+    T = eltype(err2)
+    sample_dims = ntuple(identity, ndims(err2) - 1)
+    weighted_err2 = err2 .* expand(c, ndims(err2))
+    denom = if isnothing(mask)
+        T(length(weighted_err2))
+    else
+        expanded_mask = expand(mask, ndims(err2))
+        weighted_err2 = weighted_err2 .* expanded_mask
+        feature_scale = T(prod(size(err2)[1:(ndims(err2) - ndims(mask))]))
+        feature_scale * (T(sum(expanded_mask)) + T(1e-6) * T(length(expanded_mask)))
+    end
+    numerators = vec(sum(weighted_err2, dims=sample_dims))
+    return numerators .* (T(size(err2, ndims(err2))) / denom) .* T(weight)
+end
+
+function losses(hatframes, ts; loc_weight::Real = DEFAULT_LOC_WEIGHT, rot_weight::Real = DEFAULT_ROT_WEIGHT)
     rotangent = Flowfusion.so3_tangent_coordinates_stack(values(linear(hatframes)), tensor(ts.Xt[2]))
-    #hatloc, hatrot, hataas = (values(translation(hatframes)), rotangent, aalogits)
     hatloc, hatrot = (values(translation(hatframes)), rotangent)
-    l_loc = floss(P[1], hatloc, ts.X1[1], scalefloss(P[1], ts.t, 2, 0.2f0)) * LOC_WEIGHT
-    l_rot = floss(P[2], hatrot, ts.rotξ, scalefloss(P[2], ts.t, 2, 0.2f0)) * ROT_WEIGHT
-    #l_aas = floss(P[3], hataas, ts.X1[3], scalefloss(P[3], ts.t, 1, 0.2f0)) / 100
-    #return l_loc, l_rot, l_aas
+    l_loc = floss(P[1], hatloc, ts.X1[1], scalefloss(P[1], ts.t, 2, 0.2f0)) * loc_weight
+    l_rot = floss(P[2], hatrot, ts.rotξ, scalefloss(P[2], ts.t, 2, 0.2f0)) * rot_weight
     return l_loc, l_rot
 end
 
-function per_sample_losses(hatframes, ts)
+function per_sample_losses(hatframes, ts; loc_weight::Real = DEFAULT_LOC_WEIGHT, rot_weight::Real = DEFAULT_ROT_WEIGHT)
     rotangent = Flowfusion.so3_tangent_coordinates_stack(values(linear(hatframes)), tensor(ts.Xt[2]))
     hatloc = values(translation(hatframes))
     hatrot = rotangent
@@ -84,10 +98,8 @@ function per_sample_losses(hatframes, ts)
     rot_err2 = abs2.(hatrot .- tensor(ts.rotξ.H))
     c_loc = scalefloss(P[1], ts.t, 2, 0.2f0)
     c_rot = scalefloss(P[2], ts.t, 2, 0.2f0)
-    loc_per = vec(mean(loc_err2, dims=ntuple(identity, ndims(loc_err2)-1)))
-    rot_per = vec(mean(rot_err2, dims=ntuple(identity, ndims(rot_err2)-1)))
-    loss_loc_per = loc_per .* vec(c_loc) .* LOC_WEIGHT
-    loss_rot_per = rot_per .* vec(c_rot) .* ROT_WEIGHT
+    loss_loc_per = _per_sample_loss(loc_err2, c_loc, Flowfusion.getlmask(ts.X1[1]), loc_weight)
+    loss_rot_per = _per_sample_loss(rot_err2, c_rot, Flowfusion.getlmask(ts.rotξ), rot_weight)
     per = loss_loc_per .+ loss_rot_per
     return per, loss_loc_per, loss_rot_per
 end
