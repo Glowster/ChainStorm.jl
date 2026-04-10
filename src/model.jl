@@ -43,6 +43,7 @@ function ChainStormV1(dim::Int = 384, depth::Int = 6, f_depth::Int = 6)
         pair_rff = RandomFourierFeatures(2 => 64, 1f0),
         pair_project = Dense(64 => 32, bias=false),
         disto_project = Dense(64 => 32, bias=false),
+        crystal_disto_project = Dense(64 => 32, bias=false),
         AAencoder = Dense(21 => dim, bias=false),
         selfcond_crossipa = [CrossFrameIPA(dim, IPA(IPA_settings(dim, c_z = 32)), ln = AdaLN(dim, dim)) for _ in 1:depth],
         selfcond_selfipa = [CrossFrameIPA(dim, IPA(IPA_settings(dim, c_z = 32)), ln = AdaLN(dim, dim)) for _ in 1:depth],
@@ -56,13 +57,16 @@ function ChainStormV1(dim::Int = 384, depth::Int = 6, f_depth::Int = 6)
 end
 
 #function (fc::ChainStormV1)(t, Xt, chainids, resinds; sc_frames = nothing)
-function (fc::ChainStormV1)(t, Xt, aas, chainids, resinds, disto_gram, Xtprev_frames, delta_ts, temps; sc_frames = nothing)
+function (fc::ChainStormV1)(t, Xt, aas, chainids, resinds, disto_gram, Xtprev_frames, delta_ts, temps; sc_frames = nothing, crystal_disto_gram = nothing)
     l = fc.layers
     delta_ts = 2f6 .* delta_ts
     temps = 2f-3 .* temps
     pmask = Flux.Zygote.@ignore self_att_padding_mask(Xt[1].lmask)
     pre_z = Flux.Zygote.@ignore l.pair_rff(pair_encode(resinds, chainids))
     pair_feats = l.pair_project(pre_z) + l.disto_project(disto_gram)
+    if crystal_disto_gram !== nothing
+        pair_feats = pair_feats + l.crystal_disto_project(crystal_disto_gram)
+    end
     t_rff = Flux.Zygote.@ignore l.t_rff(t)
     deltat_rff = Flux.Zygote.@ignore l.t_rff(delta_ts)
     temp_rff = Flux.Zygote.@ignore l.t_rff(temps)
