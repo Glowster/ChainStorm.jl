@@ -1,21 +1,42 @@
 module ChainStorm
 
-using Flowfusion, ForwardBackward, Flux, RandomFeatureMaps, Onion, InvariantPointAttention, BatchedTransformations, ProteinChains, DLProteinFormats, HuggingFaceApi, JLD2
+using Flowfusion, ForwardBackward, Flux, RandomFeatureMaps, Onion, InvariantPointAttention, BatchedTransformations, ProteinChains, JLD2
 using OneHotArrays #Added
+
+const UNIT_SCALING = 10
+const AA_CODES = collect("ACDEFGHIKLMNPQRSTVWY")
 
 include("flow.jl")
 include("model.jl")
 
 function load_model(; checkpoint = "ChainStormV1.jld2")
-    file = hf_hub_download("MurrellLab/ChainStorm", checkpoint)
+    Base.require(@__MODULE__, :HuggingFaceApi)
+    hf_api = getfield(@__MODULE__, :HuggingFaceApi)
+    file = hf_api.hf_hub_download("MurrellLab/ChainStorm", checkpoint)
     return Flux.loadmodel!(ChainStormV1(), JLD2.load(file, "model_state"))
 end
 
 chainids_from_lengths(lengths) = vcat([repeat([i],l) for (i,l) in enumerate(lengths)]...)
+int_to_aa(i::Integer) = i == 21 ? 'X' : AA_CODES[i]
+ints_to_aa(ints::AbstractVector{<:Integer}) = join(int_to_aa.(ints))
+
+function unflatten(locs::AbstractArray{T, 3}, rots::AbstractArray{T, 3}, seqints::AbstractVector, chainids, resnums) where {T}
+    seqstr = ints_to_aa(seqints)
+    return [
+        ProteinChain(
+            string(i),
+            get_atoms(Frames(rots[:, :, chainids .== i], reshape(locs, 3, :)[:, chainids .== i] .* UNIT_SCALING)(ProteinChains.STANDARD_RESIDUE)),
+            seqstr[findall(chainids .== i)],
+            resnums[findall(chainids .== i)],
+        )
+        for i in unique(chainids)
+    ]
+end
+
 function gen2prot(samp, chainids, resnums; name = "Gen", )
     d = Dict(zip(0:25,'A':'Z'))
     chain_letters = get.((d,), chainids, 'Z')
-    ProteinStructure(name, Atom{eltype(tensor(samp[1]))}[], DLProteinFormats.unflatten(tensor(samp[1]), tensor(samp[2]), tensor(samp[3]), chain_letters, resnums)[1])
+    ProteinStructure(name, Atom{eltype(tensor(samp[1]))}[], unflatten(tensor(samp[1]), tensor(samp[2]), tensor(samp[3]), chain_letters, resnums)[1])
  end
 export_pdb(path, samp, chainids, resnums) = ProteinChains.writepdb(path, gen2prot(samp, chainids, resnums))
 
