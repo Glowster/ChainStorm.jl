@@ -50,7 +50,7 @@ function ChainStormV1(dim::Int = 384, depth::Int = 6, f_depth::Int = 6)
         prev_selfipa = [CrossFrameIPA(dim, IPA(IPA_settings(dim, c_z = 32)), ln = AdaLN(dim, dim)) for _ in 1:depth], #TODO not self cond, rename this
         ipa_blocks = [IPAblock(dim, IPA(IPA_settings(dim, c_z = 32)), ln1 = AdaLN(dim, dim), ln2 = AdaLN(dim, dim)) for _ in 1:depth], #TODO not selfcond, rename this
         framemovers = [Framemover(dim) for _ in 1:f_depth],
-        AAdecoder = Chain(StarGLU(dim, 3dim), Dense(dim => 21, bias=false)),
+        #AAdecoder = Chain(StarGLU(dim, 3dim), Dense(dim => 21, bias=false)),
         cond_t_encoding_2 = Dense(dim => dim, bias=false),
         cond_delta_t_encoding_2 = Dense(dim => dim, bias=false),
         cond_temp_encoding_2 = Dense(dim => dim, bias=false),
@@ -59,8 +59,8 @@ function ChainStormV1(dim::Int = 384, depth::Int = 6, f_depth::Int = 6)
         pair_project_2 = Dense(64 => 32, bias=false),
         #disto_project_2 = Dense(64 => 32, bias=false),
         AAencoder_2 = Dense(21 => dim, bias=false),
-        selfcond_crossipa_2 = [CrossFrameIPA(dim, IPA(IPA_settings(dim, c_z = 32)), ln = AdaLN(dim, dim)) for _ in 1:depth],
-        selfcond_selfipa_2 = [CrossFrameIPA(dim, IPA(IPA_settings(dim, c_z = 32)), ln = AdaLN(dim, dim)) for _ in 1:depth],
+        #selfcond_crossipa_2 = [CrossFrameIPA(dim, IPA(IPA_settings(dim, c_z = 32)), ln = AdaLN(dim, dim)) for _ in 1:depth],
+        #selfcond_selfipa_2 = [CrossFrameIPA(dim, IPA(IPA_settings(dim, c_z = 32)), ln = AdaLN(dim, dim)) for _ in 1:depth],
         modelpred_crossipa = [CrossFrameIPA(dim, IPA(IPA_settings(dim, c_z = 32)), ln = AdaLN(dim, dim)) for _ in 1:depth],
         modelpred_selfipa = [CrossFrameIPA(dim, IPA(IPA_settings(dim, c_z = 32)), ln = AdaLN(dim, dim)) for _ in 1:depth], #TODO not self cond, rename this
         ipa_blocks_2 = [IPAblock(dim, IPA(IPA_settings(dim, c_z = 32)), ln1 = AdaLN(dim, dim), ln2 = AdaLN(dim, dim)) for _ in 1:depth], #TODO not selfcond, rename this
@@ -72,7 +72,7 @@ end
 
 
 #function (fc::ChainStormV1)(t, Xt, chainids, resinds; sc_frames = nothing)
-function (fc::ChainStormV1)(t, Xt, aas, chainids, resinds, disto_gram, Xtprev_frames, delta_ts, temps; Xt_2 = nothing, delta_ts_2 = nothing, sc_frames = nothing, sc_frames_2 = nothing)
+function (fc::ChainStormV1)(t, Xt, aas, chainids, resinds, disto_gram, Xtprev_frames, delta_ts, temps; Xt_2 = nothing, delta_ts_2 = nothing, sc_frames = nothing)#, sc_frames_2 = nothing)
 
     
     l = fc.layers
@@ -127,11 +127,11 @@ function (fc::ChainStormV1)(t, Xt, aas, chainids, resinds, disto_gram, Xtprev_fr
 
         x_2 = l.AAencoder_2(AA_one_hots .+ 0)
         for i in 1:l.depth
-            if sc_frames_2 !== nothing
-                x_2 = Flux.Zygote.checkpointed(crossipa, l.selfcond_selfipa_2[i], sc_frames_2, sc_frames_2, x_2, pair_feats_2, cond_2, pmask)
-                f1, f2 = mod(i, 2) == 0 ? (frames_2, sc_frames_2) : (sc_frames_2, frames_2)
-                x_2 = Flux.Zygote.checkpointed(crossipa, l.selfcond_crossipa_2[i], f1, f2, x_2, pair_feats_2, cond_2, pmask)
-            end
+            # if sc_frames_2 !== nothing
+            #     x_2 = Flux.Zygote.checkpointed(crossipa, l.selfcond_selfipa_2[i], sc_frames_2, sc_frames_2, x_2, pair_feats_2, cond_2, pmask)
+            #     f1, f2 = mod(i, 2) == 0 ? (frames_2, sc_frames_2) : (sc_frames_2, frames_2)
+            #     x_2 = Flux.Zygote.checkpointed(crossipa, l.selfcond_crossipa_2[i], f1, f2, x_2, pair_feats_2, cond_2, pmask)
+            # end
 
             x_2 = Flux.Zygote.checkpointed(crossipa, l.modelpred_selfipa[i], frames, frames, x_2, pair_feats_2, cond_2, pmask)
             f1, f2 = mod(floor(i/2), 2) == 0 ? (frames_2, frames) : (frames, frames_2)
