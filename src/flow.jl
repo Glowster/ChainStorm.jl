@@ -1,15 +1,18 @@
 const rotM = Flowfusion.Rotations(3)
 
 schedule_f(t) = 1-(1-t)^2
+schedule_f_2(t) = t
+
 #const P = (FProcess(BrownianMotion(0.2f0), schedule_f), FProcess(ManifoldProcess(0.2f0), schedule_f), NoisyInterpolatingDiscreteFlow(0.2f0, K = 2, dummy_token = 21))
 
 P = (FProcess(BrownianMotion(0.2f0), schedule_f), FProcess(ManifoldProcess(0.2f0), schedule_f))
+P_2 = (FProcess(BrownianMotion(0.2f0), schedule_f_2), FProcess(ManifoldProcess(0.2f0), schedule_f_2))
 
-function compound_state(b)
+function compound_state(b, locs, rots)
     L,B = size(b.aas)
     cmask = b.aas .< 100
-    X1locs = MaskedState(ContinuousState(b.locs), cmask, b.padmask)
-    X1rots = MaskedState(ManifoldState(rotM,eachslice(b.rots, dims=(3,4))), cmask, b.padmask)
+    X1locs = MaskedState(ContinuousState(locs), cmask, b.padmask)
+    X1rots = MaskedState(ManifoldState(rotM,eachslice(rots, dims=(3,4))), cmask, b.padmask)
     #X1aas = MaskedState(DiscreteState(21, Flux.onehotbatch(b.aas, 1:21)), cmask, b.padmask)
     #return (X1locs, X1rots, X1aas)
     return (X1locs, X1rots)
@@ -53,12 +56,16 @@ end
 
 function training_sample(b)
     X0 = zero_state(b)
-    X1 = compound_state(b)
+    X0_2 = zero_state(b)
+    X1 = compound_state(b, b.locs, b.rots)
+    X1_2 = compound_state(b, b.locs_2, b.rots_2)
     t = rand(Float32, 1, size(b.aas,2))
     Xt = bridge(P, X0, X1, t)
+    Xt_2 = bridge(P_2, X0_2, X1_2, t)
     rotξ = Guide(Xt[2], X1[2])
+    rotξ_2 = Guide(Xt_2[2], X1_2[2])
     #return (; t, Xt, X1, rotξ, chainids = b.chainids, resinds = b.resinds)
-    return (; t, Xt, X1, rotξ, aas = b.aas, chainids = b.chainids, resinds = b.resinds)
+    return (; t, Xt, Xt_2, X1, X1_2, rotξ, rotξ_2, aas = b.aas, chainids = b.chainids, resinds = b.resinds)
 end
 
 const DEFAULT_LOC_WEIGHT = 1f0
@@ -82,15 +89,21 @@ function _per_sample_loss(err2, c, mask, weight)
     return numerators .* (T(size(err2, ndims(err2))) / denom) .* T(weight)
 end
 
-function losses(hatframes, ts; loc_weight::Real = DEFAULT_LOC_WEIGHT, rot_weight::Real = DEFAULT_ROT_WEIGHT)
+function losses(hatframes, hatframes_2, ts; loc_weight::Real = DEFAULT_LOC_WEIGHT, rot_weight::Real = DEFAULT_ROT_WEIGHT)
     rotangent = Flowfusion.so3_tangent_coordinates_stack(values(linear(hatframes)), tensor(ts.Xt[2]))
     hatloc, hatrot = (values(translation(hatframes)), rotangent)
     l_loc = floss(P[1], hatloc, ts.X1[1], scalefloss(P[1], ts.t, 2, 0.2f0)) * loc_weight
     l_rot = floss(P[2], hatrot, ts.rotξ, scalefloss(P[2], ts.t, 2, 0.2f0)) * rot_weight
-    return l_loc, l_rot
+
+    rotangent = Flowfusion.so3_tangent_coordinates_stack(values(linear(hatframes_2)), tensor(ts.Xt_2[2]))
+    hatloc, hatrot = (values(translation(hatframes_2)), rotangent)
+    l_loc_2 = floss(P_2[1], hatloc, ts.X1_2[1], scalefloss(P_2[1], ts.t, 2, 0.2f0)) * loc_weight
+    l_rot_2 = floss(P_2[2], hatrot, ts.rotξ_2, scalefloss(P_2[2], ts.t, 2, 0.2f0)) * rot_weight
+
+    return l_loc, l_rot, l_loc_2, l_rot_2
 end
 
-function per_sample_losses(hatframes, ts; loc_weight::Real = DEFAULT_LOC_WEIGHT, rot_weight::Real = DEFAULT_ROT_WEIGHT)
+function per_sample_losses(hatframes, hatframes_2, ts; loc_weight::Real = DEFAULT_LOC_WEIGHT, rot_weight::Real = DEFAULT_ROT_WEIGHT)
     rotangent = Flowfusion.so3_tangent_coordinates_stack(values(linear(hatframes)), tensor(ts.Xt[2]))
     hatloc = values(translation(hatframes))
     hatrot = rotangent
@@ -101,7 +114,19 @@ function per_sample_losses(hatframes, ts; loc_weight::Real = DEFAULT_LOC_WEIGHT,
     loss_loc_per = _per_sample_loss(loc_err2, c_loc, Flowfusion.getlmask(ts.X1[1]), loc_weight)
     loss_rot_per = _per_sample_loss(rot_err2, c_rot, Flowfusion.getlmask(ts.rotξ), rot_weight)
     per = loss_loc_per .+ loss_rot_per
-    return per, loss_loc_per, loss_rot_per
+
+    rotangent = Flowfusion.so3_tangent_coordinates_stack(values(linear(hatframes_2)), tensor(ts.Xt_2[2]))
+    hatloc_2 = values(translation(hatframes_2))
+    hatrot_2 = rotangent
+    loc_err2 = abs2.(hatloc_2 .- tensor(ts.X1_2[1]))
+    rot_err2 = abs2.(hatrot_2 .- tensor(ts.rotξ_2.H))
+    c_loc = scalefloss(P_2[1], ts.t, 2, 0.2f0)
+    c_rot = scalefloss(P_2[2], ts.t, 2, 0.2f0)
+    loss_loc_per_2 = _per_sample_loss(loc_err2, c_loc, Flowfusion.getlmask(ts.X1_2[1]), loc_weight)
+    loss_rot_per_2 = _per_sample_loss(rot_err2, c_rot, Flowfusion.getlmask(ts.rotξ_2), rot_weight)
+    per_2 = loss_loc_per_2 .+ loss_rot_per_2
+
+    return per, loss_loc_per, loss_rot_per, per_2, loss_loc_per_2, loss_rot_per_2
 end
 
 function flowX1predictor(X0, b, model, disto_gram, Xtprev_frames, delta_ts, temps; d = identity, smooth = 0)
@@ -113,7 +138,7 @@ function flowX1predictor(X0, b, model, disto_gram, Xtprev_frames, delta_ts, temp
     function m(t, Xt)
         print(".")
         #f, aalogits = model(d(t .+ zeros(Float32, 1, batch_dim)), d(Xt), d(b.chainids), d(b.resinds), sc_frames = f) 
-        f = model(d(t .+ zeros(Float32, 1, batch_dim)), d(Xt), d(b.aas), d(b.chainids), d(b.resinds), d(disto_gram), d(Xtprev_frames), d(delta_ts), d(temps), sc_frames = f) 
+        f = model(d(t .+ zeros(Float32, 1, batch_dim)), d(Xt), d(b.aas), d(b.chainids), d(b.resinds), d(disto_gram), d(Xtprev_frames), d(delta_ts), d(temps), sc_frames = f)
         values(translation(f)) .= prev_trans .* T(smooth) .+ values(translation(f)) .* T(1-smooth)
         prev_trans = values(translation(f))
         #return cpu(values(translation(f))), ManifoldState(rotM, eachslice(cpu(values(linear(f))), dims=(3,4))), cpu(softmax(aalogits))

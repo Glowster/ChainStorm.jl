@@ -72,7 +72,7 @@ end
 
 
 #function (fc::ChainStormV1)(t, Xt, chainids, resinds; sc_frames = nothing)
-function (fc::ChainStormV1)(t, Xt, Xt_2 aas, chainids, resinds, disto_gram, Xtprev_frames, delta_ts, delta_ts_2, temps, training = true; sc_frames = nothing, sc_frames_2 = nothing)
+function (fc::ChainStormV1)(t, Xt, aas, chainids, resinds, disto_gram, Xtprev_frames, delta_ts, temps; Xt_2 = nothing, delta_ts_2 = nothing, sc_frames = nothing, sc_frames_2 = nothing)
 
     
     l = fc.layers
@@ -109,9 +109,11 @@ function (fc::ChainStormV1)(t, Xt, Xt_2 aas, chainids, resinds, disto_gram, Xtpr
     end
     #aa_logits = l.AAdecoder(x .+ reshape(l.AApre_t_encoding(t_rff), :, 1, size(t,2)))   
     #return frames, aa_logits
-    if training == false
-        return frames
-    else
+    if (Xt_2 === nothing) != (delta_ts_2 === nothing)
+      error("Xt_2 and delta_ts_2 must be provided together")
+    end
+
+    if Xt_2 !== nothing && delta_ts_2 !== nothing 
         delta_ts_2 = 2f6 .* delta_ts_2
 
         pair_feats_2 = l.pair_project_2(pre_z) #+ l.disto_project_2(disto_gram)
@@ -142,5 +144,7 @@ function (fc::ChainStormV1)(t, Xt, Xt_2 aas, chainids, resinds, disto_gram, Xtpr
         end
 
         return frames, frames_2
+    else
+        return frames
     end
 end
