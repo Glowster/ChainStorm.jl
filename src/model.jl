@@ -72,7 +72,7 @@ end
 
 
 #function (fc::ChainStormV1)(t, Xt, chainids, resinds; sc_frames = nothing)
-function (fc::ChainStormV1)(t, Xt, aas, chainids, resinds, disto_gram, Xtprev_frames, delta_ts, delta_ts_2, temps, training = true; sc_frames = nothing, sc_frames_2 = nothing)
+function (fc::ChainStormV1)(t, Xt, Xt_2 aas, chainids, resinds, disto_gram, Xtprev_frames, delta_ts, delta_ts_2, temps, training = true; sc_frames = nothing, sc_frames_2 = nothing)
 
     
     l = fc.layers
@@ -119,7 +119,7 @@ function (fc::ChainStormV1)(t, Xt, aas, chainids, resinds, disto_gram, Xtprev_fr
         deltat_rff_2 = Flux.Zygote.@ignore l.t_rff(delta_ts_2)
         # temp_rff = Flux.Zygote.@ignore l.t_rff(temps)
         cond_2 = reshape(l.cond_t_encoding_2(t_rff)+l.cond_delta_t_encoding_2(deltat_rff_2)+l.cond_temp_encoding_2(temp_rff), :, 1, size(t,2))
-        frames_2 = Translation(tensor(Xt[1])) ∘ Rotation(tensor(Xt[2]))
+        frames_2 = Translation(tensor(Xt_2[1])) ∘ Rotation(tensor(Xt_2[2]))
         #AA_one_hots_2 = tensor(Flux.onehotbatch(aas, 1:21))
         #AA_one_hots = tensor(Xt[3])
 
